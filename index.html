@@ -1,0 +1,248 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Letters</title>
+
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    body {
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+
+    #status {
+      position: absolute;
+      left: 12px;
+      top: 12px;
+      color: white;
+      font: 12px Arial, sans-serif;
+      pointer-events: none;
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div id="status">загружаем буквы...</div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from
+      'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/loaders/GLTFLoader.js';
+
+    const status = document.getElementById('status');
+
+    const scene = new THREE.Scene();
+
+    const camera = new THREE.PerspectiveCamera(
+      35, window.innerWidth / window.innerHeight, 0.1, 100
+    );
+    camera.position.set(0, 0, 14);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({
+      alpha: true,
+      antialias: true
+    });
+
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+
+    document.body.appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x444466, 2));
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 3);
+    keyLight.position.set(-3, 5, 8);
+    scene.add(keyLight);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 1.5);
+    fillLight.position.set(5, 1, 5);
+    scene.add(fillLight);
+
+    const loader = new GLTFLoader();
+    const objects = [];
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2(10, 10);
+
+    const files = [
+      { file: 'star.glb', height: 0.48 },
+      { file: 'letterN.glb', height: 2.1 },
+      { file: 'letterI.glb', height: 2.1 },
+      { file: 'letterC.glb', height: 2.1 },
+      { file: 'letterO.glb', height: 2.1 },
+      { file: 'letterL.glb', height: 2.1 },
+      { file: 'letterE.glb', height: 2.1 },
+      { file: 'star.glb', height: 0.48 }
+    ];
+
+    function loadModel(file) {
+      const url = './' + file;
+
+      return new Promise((resolve, reject) => {
+        loader.load(url, resolve, undefined, reject);
+      });
+    }
+
+    async function init() {
+      try {
+        const loaded = await Promise.all(
+          files.map(async (item) => {
+            const gltf = await loadModel(item.file);
+            const pivot = new THREE.Group();
+            const model = gltf.scene;
+
+            const box = new THREE.Box3().setFromObject(model);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const scale = item.height / maxDim;
+
+            model.position.sub(center);
+            model.scale.setScalar(scale);
+
+            pivot.add(model);
+
+            return {
+              pivot,
+              width: size.x * scale,
+              height: size.y * scale,
+              rotation: 0,
+              speed: 0,
+              targetSpeed: 0,
+              phase: Math.random() * Math.PI * 2
+            };
+          })
+        );
+
+        // Расставляем буквы в ряд и центрируем надпись.
+        const gap = 0.12;
+        const totalWidth = loaded.reduce(
+          (sum, item) => sum + item.width, 0
+        ) + gap * (loaded.length - 1);
+
+        let x = -totalWidth / 2;
+
+        loaded.forEach((item, index) => {
+          item.pivot.position.x = x + item.width / 2;
+
+          // Звёздочки немного выносим к краям.
+          if (index === 0 || index === loaded.length - 1) {
+            item.pivot.position.y = 0.12;
+          }
+
+          scene.add(item.pivot);
+          objects.push(item);
+          x += item.width + gap;
+        });
+
+        status.style.display = 'none';
+      } catch (error) {
+        console.error(error);
+        status.textContent =
+          'не удалось загрузить модели. проверь файлы в репозитории.';
+      }
+    }
+
+    function updatePointer(event) {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    }
+
+    renderer.domElement.addEventListener('pointermove', updatePointer);
+    renderer.domElement.addEventListener('pointerleave', () => {
+      pointer.set(10, 10);
+    });
+
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = Math.min(clock.getDelta(), 0.05);
+      const time = clock.elapsedTime;
+
+      raycaster.setFromCamera(pointer, camera);
+
+      const hit = raycaster.intersectObjects(
+        objects.map(item => item.pivot), true
+      );
+
+      let active = null;
+
+      if (hit.length) {
+        active = objects.find(item =>
+          item.pivot === hit[0].object ||
+          item.pivot.getObjectById(hit[0].object.id)
+        );
+
+        // Ищем родительскую букву, если луч попал в её дочернюю mesh.
+        if (!active) {
+          active = objects.find(item => {
+            let node = hit[0].object;
+            while (node) {
+              if (node === item.pivot) return true;
+              node = node.parent;
+            }
+            return false;
+          });
+        }
+      }
+
+      objects.forEach((item) => {
+        const isActive = item === active;
+        item.targetSpeed = isActive ? 5 : 0;
+        item.speed += (item.targetSpeed - item.speed) * Math.min(1, delta * 5);
+
+        item.rotation += item.speed * delta;
+        item.pivot.rotation.y = item.rotation;
+
+        // Лёгкое живое движение, когда буква не активна.
+        item.pivot.rotation.z = Math.sin(time * 0.7 + item.phase) * 0.025;
+      });
+
+      renderer.render(scene, camera);
+    }
+
+    function resize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    window.addEventListener('resize', resize);
+
+    init();
+    animate();
+  </script>
+</body>
+</html>
