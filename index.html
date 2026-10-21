@@ -135,6 +135,7 @@
               pivot,
               width: size.x * scale,
               height: size.y * scale,
+              radius: maxDim * scale / 2,
               rotation: 0,
               speed: 0,
               targetSpeed: 0,
@@ -151,18 +152,30 @@
 
         let x = -totalWidth / 2;
 
-        loaded.forEach((item, index) => {
-          item.pivot.position.x = x + item.width / 2;
+        
+loaded.forEach((item, index) => {
+  item.pivot.position.x = x + item.width / 2;
 
-          // Звёздочки немного выносим к краям.
-          if (index === 0 || index === loaded.length - 1) {
-            item.pivot.position.y = 0.12;
-          }
+  // Звёздочки немного выносим к краям.
+  if (index === 0 || index === loaded.length - 1) {
+    item.pivot.position.y = 0.12;
+  }
 
-          scene.add(item.pivot);
-          objects.push(item);
-          x += item.width + gap;
-        });
+  scene.add(item.pivot);
+  objects.push(item);
+  x += item.width + gap;
+});
+
+// Поднимаем всю композицию примерно на 70 px.
+const raiseBy = 70 *
+  (2 * camera.position.z *
+  Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) /
+  window.innerHeight;
+
+objects.forEach(item => {
+  item.pivot.position.y += raiseBy;
+});
+
 
         status.style.display = 'none';
       } catch (error) {
@@ -191,35 +204,41 @@
       const delta = Math.min(clock.getDelta(), 0.05);
       const time = clock.elapsedTime;
 
-      raycaster.setFromCamera(pointer, camera);
+      
+const pointerX = (pointer.x + 1) * 0.5 * window.innerWidth;
+const pointerY = (1 - pointer.y) * 0.5 * window.innerHeight;
 
-      const hit = raycaster.intersectObjects(
-        objects.map(item => item.pivot), true
-      );
+const activeObjects = [];
 
-      let active = null;
+objects.forEach(item => {
+  const center = new THREE.Vector3();
+  item.pivot.getWorldPosition(center);
+  center.project(camera);
 
-      if (hit.length) {
-        active = objects.find(item =>
-          item.pivot === hit[0].object ||
-          item.pivot.getObjectById(hit[0].object.id)
-        );
+  const centerX = (center.x + 1) * 0.5 * window.innerWidth;
+  const centerY = (1 - center.y) * 0.5 * window.innerHeight;
 
-        // Ищем родительскую букву, если луч попал в её дочернюю mesh.
-        if (!active) {
-          active = objects.find(item => {
-            let node = hit[0].object;
-            while (node) {
-              if (node === item.pivot) return true;
-              node = node.parent;
-            }
-            return false;
-          });
-        }
-      }
+  const distanceToCamera =
+    camera.position.distanceTo(item.pivot.getWorldPosition(new THREE.Vector3()));
+
+  const radiusPx =
+    item.radius * window.innerHeight /
+    (2 * distanceToCamera *
+    Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+
+  const distance = Math.hypot(
+    pointerX - centerX,
+    pointerY - centerY
+  );
+
+  // 20 px дополнительной зоны вокруг модели.
+  if (distance <= radiusPx + 20) {
+    activeObjects.push(item);
+  }
+});
 
       objects.forEach((item) => {
-        const isActive = item === active;
+        const isActive = activeObjects.includes(item);
         item.targetSpeed = isActive ? 5 : 0;
         item.speed += (item.targetSpeed - item.speed) * Math.min(1, delta * 5);
 
